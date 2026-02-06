@@ -11,6 +11,72 @@ The system is designed for:
 
 ---
 
+## What Triggers Search
+
+**Key insight**: Search is NOT automatic. There is no middleware that pre-fetches results or injects them into context. The agent (Claude) **autonomously decides** to search based on instructions.
+
+### The Causality Chain
+
+```
+User sends message
+       │
+       ▼
+System prompt is built (includes "Memory Recall" section)
+       │
+       ▼
+Agent reads system prompt instruction:
+  "Before answering anything about prior work, decisions,
+   dates, people, preferences, or todos: run memory_search"
+       │
+       ▼
+Agent reads tool description:
+  "Mandatory recall step: semantically search MEMORY.md..."
+       │
+       ▼
+Agent DECIDES whether to call memory_search
+       │
+       ▼
+If called → search executes → results returned to agent
+```
+
+### System Prompt Instruction
+
+From `src/agents/system-prompt.ts` (lines 40-66), the `buildMemorySection` function injects:
+
+> "Before answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search on MEMORY.md + memory/*.md"
+
+This section is only included if `memory_search` or `memory_get` tools are available.
+
+### Tool Description
+
+From `src/agents/tools/memory-tool.ts` (line 43-44):
+
+```typescript
+description: "Mandatory recall step: semantically search MEMORY.md +
+  memory/*.md (and optional session transcripts) before answering
+  questions about prior work, decisions, dates, people, preferences,
+  or todos; returns top snippets with path + lines."
+```
+
+### What's NOT Happening
+
+| Approach | Used? | Notes |
+|----------|-------|-------|
+| Automatic pre-search before turns | ❌ | No middleware |
+| Auto-injection of memory into prompts | ❌ | Agent must call tool |
+| Mandatory enforcement at execution time | ❌ | Agent decides |
+| Hidden search based on message content | ❌ | Explicit tool call required |
+| RAG-style context stuffing | ❌ | Pull model, not push |
+
+### Why This Design?
+
+1. **Token efficiency**: Only search when needed, not every turn
+2. **Agent judgment**: Model decides if question requires recall
+3. **Transparency**: Search is a visible tool call, not hidden magic
+4. **Flexibility**: Agent can search multiple times or refine queries
+
+---
+
 ## The Problem Being Solved
 
 ### Why Search Matters for AI Agents
