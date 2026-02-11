@@ -77,6 +77,121 @@ description: "Mandatory recall step: semantically search MEMORY.md +
 
 ---
 
+## Scoping and Isolation
+
+### One Tool, Per-Agent Databases
+
+There is **ONE search tool** (`memory_search`) but each agent has its own **isolated SQLite database**:
+
+```
+~/.openclaw/memory/
+├── agent-a.sqlite    ← Agent A's database
+├── agent-b.sqlite    ← Agent B's database
+└── agent-c.sqlite    ← Agent C's database
+```
+
+From `src/agents/memory-search.ts`:
+```typescript
+function resolveStorePath(agentId: string): string {
+  return path.join(stateDir, "memory", `${agentId}.sqlite`);
+}
+```
+
+**No cross-agent queries exist.** Complete isolation at the storage layer.
+
+### Source Filtering Within a Database
+
+Within each agent's database, content is tagged by source:
+
+| Source | What It Contains |
+|--------|------------------|
+| `"memory"` | MEMORY.md, memory/*.md, extraPaths files |
+| `"sessions"` | Indexed conversation transcripts (optional) |
+
+Configuration controls which sources are searched:
+
+```yaml
+agents:
+  defaults:
+    memorySearch:
+      sources: ["memory"]              # Default: only memory files
+  list:
+    - id: research-agent
+      memorySearch:
+        sources: ["memory", "sessions"] # This agent can search past conversations
+```
+
+Every query includes: `WHERE source IN (?, ?)` with the agent's configured sources.
+
+### ExtraPaths: What Gets Indexed
+
+`extraPaths` controls which files are indexed into the agent's database:
+
+```yaml
+agents:
+  list:
+    - id: team-agent
+      memorySearch:
+        extraPaths:
+          - ~/docs/team-wiki      # Team docs indexed
+          - ~/docs/api-reference  # API docs indexed
+    - id: personal-agent
+      memorySearch:
+        extraPaths:
+          - ~/notes/private       # Only personal notes
+```
+
+Files from different paths are all indexed with `source="memory"` but into separate per-agent databases.
+
+### No Runtime Permissions
+
+There is **NO ACL or permission model** within search:
+
+| What's NOT Supported | Why |
+|---------------------|-----|
+| Cross-agent queries | Separate databases prevent this |
+| Field-level ACLs | Not implemented |
+| Role-based filtering | Not implemented |
+| "Agent X can see file Y" rules | Use extraPaths instead |
+
+**Isolation is architectural, not policy-based.** If you don't want an agent to see certain files, don't include them in that agent's `extraPaths`.
+
+### Multi-Agent Configuration Example
+
+```yaml
+agents:
+  defaults:
+    memorySearch:
+      provider: openai
+      sources: ["memory"]
+      extraPaths:
+        - ~/docs/shared           # All agents see shared docs
+
+  list:
+    - id: support-agent
+      memorySearch:
+        sources: ["memory", "sessions"]  # Can recall past conversations
+        extraPaths:
+          - ~/docs/support-kb            # Support-specific knowledge
+
+    - id: dev-agent
+      memorySearch:
+        provider: local                   # Privacy: local embeddings
+        extraPaths:
+          - ~/code/internal-docs          # Dev-specific docs
+
+    - id: public-agent
+      memorySearch:
+        extraPaths: []                    # Only MEMORY.md, no extras
+```
+
+Result:
+- `support-agent.sqlite` → shared + support KB + sessions
+- `dev-agent.sqlite` → shared + internal docs (local embeddings)
+- `public-agent.sqlite` → only MEMORY.md and memory/*.md
+
+---
+
 ## The Problem Being Solved
 
 ### Why Search Matters for AI Agents
