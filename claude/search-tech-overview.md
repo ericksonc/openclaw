@@ -79,6 +79,114 @@ description: "Mandatory recall step: semantically search MEMORY.md +
 
 ## Scoping and Isolation
 
+### What IS an Agent?
+
+An **agent** is a **configuration profile**, not a conversation. It defines:
+
+| Property | Purpose |
+|----------|---------|
+| `id` | Unique identifier (e.g., `"main"`, `"work"`, `"support"`) |
+| `model` | Which LLM to use |
+| `workspace` | Directory for file operations |
+| `tools` | Allowlist/blocklist of capabilities |
+| `memorySearch` | Search configuration (provider, sources, extraPaths) |
+| `identity` | Name, avatar, emoji |
+| `sandbox` | Execution isolation settings |
+
+**Key distinction:**
+- **Agent** = configuration profile (reusable)
+- **Session** = active conversation (one agent, one context)
+- **Relationship**: One agent → many sessions
+
+### How Agents Are Created
+
+Agents are **explicitly configured by users** in config files, not auto-created per conversation:
+
+```yaml
+# ~/.openclaw/config.yaml or ./openclaw.yaml
+agents:
+  defaults:
+    model: anthropic/claude-opus-4
+
+  list:
+    - id: main
+      default: true                    # Fallback when no routing matches
+      workspace: ~/openclaw
+
+    - id: work
+      name: "Work Assistant"
+      workspace: ~/work-projects
+      tools:
+        deny: [exec]                   # No shell access
+      memorySearch:
+        extraPaths: [~/docs/work]
+
+    - id: support
+      memorySearch:
+        sources: ["memory", "sessions"] # Can search past conversations
+        extraPaths: [~/docs/support-kb]
+```
+
+**If no agents configured:** A default `"main"` agent is created automatically.
+
+### Agents vs Sessions vs Conversations
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Agent: "work"                        │
+│  (config: model, tools, workspace, memorySearch)            │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  Session: agent:work:telegram:dm:alice                      │
+│  Session: agent:work:telegram:dm:bob                        │
+│  Session: agent:work:slack:channel:eng                      │
+│  Session: agent:work:whatsapp:dm:+1234567890                │
+│                                                             │
+│  All share the same:                                        │
+│  - Tools configuration                                      │
+│  - Memory database (work.sqlite)                            │
+│  - Workspace directory                                      │
+│                                                             │
+│  Each has its own:                                          │
+│  - Conversation history                                     │
+│  - Session state                                            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Session key format:** `agent:{agentId}:{channel}:{context}`
+
+Examples:
+- `agent:main:telegram:dm:user123` → main agent, Telegram DM with user123
+- `agent:work:slack:channel:engineering` → work agent, Slack #engineering
+- `agent:support:web:session:abc123` → support agent, web chat session
+
+### Routing Messages to Agents
+
+Messages are routed to agents via **bindings**:
+
+```yaml
+bindings:
+  - agentId: work
+    match:
+      channel: slack
+      accountId: company-workspace    # All Slack in this workspace → work agent
+
+  - agentId: support
+    match:
+      channel: telegram
+      peer:
+        kind: group
+        id: support-channel           # This specific group → support agent
+
+  - agentId: main                     # Fallback for everything else
+```
+
+**Resolution order:**
+1. Specific peer binding (exact DM/channel match)
+2. Account binding (all messages from this account)
+3. Channel binding (all messages from this channel type)
+4. Default agent (if nothing matches)
+
 ### One Tool, Per-Agent Databases
 
 There is **ONE search tool** (`memory_search`) but each agent has its own **isolated SQLite database**:
